@@ -12,7 +12,7 @@ import secrets
 
 import redis
 
-TOKEN_TTL_SECONDS = 1800  # 30 minutes
+TOKEN_TTL_SECONDS = 1800  # 30 minutes/1800 min
 
 
 def redis_client() -> redis.Redis:
