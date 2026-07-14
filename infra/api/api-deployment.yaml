@@ -25,7 +25,7 @@ spec:
       serviceAccountName: gcp-k8s-finops-sa
       containers:
         - name: api
-          image: asia-southeast1-docker.pkg.dev/project-7fbcd177-353a-4b5e-bd8/finops-copilot-agent/finops-copilot-agent:manual-20260714113053
+          image: asia-southeast1-docker.pkg.dev/project-7fbcd177-353a-4b5e-bd8/finops-copilot-agent/finops-copilot-agent:bf9b6429b4188fa9b2427b3b3d77f920674a91fa
           ports:
             - containerPort: 8000
           env:
