@@ -1,0 +1,62 @@
+# --- Secrets ---
+# .env holds OPENAI_API_KEY / GCP_PROJECT_ID etc. — never commit real keys.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+credentials.json
+*_credentials.json
+service-account*.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+env/
+.mypy_cache/
+.ruff_cache/
+
+# --- Generated data (reproducible via generate_mock_data.py / rag.py — not source) ---
+agent_code/data/billing/*.csv
+agent_code/data/billing/*.json
+agent_code/data/chroma/
+
+# Assets/ (architecture diagrams) is tracked — referenced from README.md
+
+# --- Eval harness per-run detail (evals/results/history.csv IS tracked — the trend artifact) ---
+agent_code/evals/results/*.json
+
+# --- Claude Code local settings (per-developer, not shared config) ---
+.claude/settings.local.json
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ---- Infra/secret----
+secret.yaml
+
+# --- Personal notes (interview prep etc.) — not portfolio documentation ---
+INTERVIEW_PREP.md
+
+# --- Local-only deploy script, kept out of the public repo on purpose ---
+deploy.sh
+
+# --- Personal GitHub setup reference script, not project documentation ---
+github-repo-setup.sh
+
+# --- Live-debugging scratch output (verify-*.sh scripts, curl dumps —
+# regenerable by re-running the script, not something to track) ---
+*-verify-output.txt
+curl_output.txt
+prom-targets.json
+show_value_*.txt
+templog.txt

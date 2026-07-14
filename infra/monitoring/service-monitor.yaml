@@ -1,0 +1,25 @@
+# ServiceMonitor is a Prometheus-Operator CRD (installed by the
+# kube-prometheus-stack chart) — applying this before that chart is
+# installed will fail with "no matches for kind ServiceMonitor".
+#
+# The `release: kube-prometheus-stack` label matches this chart's
+# default `serviceMonitorSelectorNilUsesHelmValues: true` behavior,
+# which otherwise ignores ServiceMonitors it didn't create itself.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: finops-copilot-api
+  namespace: finops-copilot
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - finops-copilot
+  selector:
+    matchLabels:
+      app: finops-copilot-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s

@@ -1,0 +1,85 @@
+# The `image:` line reflects the last image build-and-push.yml pushed.
+# That workflow patches this line in place and opens a PR; merging the
+# PR triggers sync-manifest-to-cluster.yml to apply it. Don't hand-edit
+# the image line — the value below is a bootstrap placeholder until the
+# first build-and-push.yml run replaces it.
+--- 
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finops-copilot-api
+  namespace: finops-copilot
+  labels:
+    app: finops-copilot-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: finops-copilot-api
+  template:
+    metadata:
+      labels:
+        app: finops-copilot-api
+    spec:
+      # WORKLOAD IDENTITY LOCATION: Reference the ServiceAccount here
+      serviceAccountName: gcp-k8s-finops-sa
+      containers:
+        - name: api
+          image: asia-southeast1-docker.pkg.dev/project-7fbcd177-353a-4b5e-bd8/finops-copilot-agent/finops-copilot-agent:manual-20260714113053
+          ports:
+            - containerPort: 8000
+          env:
+            # Not secret — Redis has no auth (see infra/redis/README.md),
+            # and this is only reachable inside the cluster.
+            - name: REDIS_URL
+              value: "redis://finops-redis.finops-copilot.svc.cluster.local:6379/0"
+            # Not secret — just an identifier (project.dataset). Actual
+            # BigQuery access is via Workload Identity (serviceAccountName
+            # above), not a credential in this env value.
+            - name: BIGQUERY_DATASET
+              value: "project-7fbcd177-353a-4b5e-bd8.finops_copilot"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: finops-copilot-secrets
+                  key: OPENAI_API_KEY
+            # Pre-wired but unused while infra/redis/ has no auth enabled —
+            # flip infra/redis/redis-deployment.yaml to add --requirepass,
+            # add REDIS_PASSWORD to the secret below, and reference it here
+            # if Redis auth is ever turned on.
+            # - name: REDIS_PASSWORD
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: finops-copilot-secrets
+            #       key: REDIS_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+--- 
+apiVersion: v1
+kind: Service
+metadata:
+  name: finops-copilot-api
+  namespace: finops-copilot
+spec:
+  type: ClusterIP
+  selector:
+    app: finops-copilot-api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

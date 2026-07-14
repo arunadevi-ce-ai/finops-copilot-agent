@@ -1,0 +1,58 @@
+# Not yet exercised against a real Actions run — verify before relying
+# on this.
+name: PR validation
+
+# Runs on every PR targeting main, before a human reviews it. No
+# OPENAI_API_KEY needed, no GCP/WIF auth, no real LLM calls, so it can
+# run on every push to a PR branch without spending anything or
+# needing secrets exposed to PR branches. test_orchestrator.py,
+# test_metrics.py, test_mcp_server.py, and test_evals.py's default
+# full run all make real OpenAI calls and are excluded here; run those
+# by hand for a deeper pre-merge check when it matters.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent_code
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Mirrors the Dockerfile's build-time step: generates the mock
+      # billing data (gitignored, not committed) and ingests policies
+      # into Chroma — both needed before detector.py/rag.py tests can
+      # run against anything.
+      - name: Generate fixture data
+        run: |
+          python generate_mock_data.py
+          python rag.py
+
+      # Zero-API-cost tests only. test_evals.py isn't in this list —
+      # its default run() call includes the 2 LLM-backed scenarios;
+      # evals --fast below covers the deterministic part instead.
+      - name: Run fast test suite
+        run: |
+          pytest -q \
+            --ignore=test_orchestrator.py \
+            --ignore=test_metrics.py \
+            --ignore=test_mcp_server.py \
+            --ignore=test_evals.py
+
+      # Detector-only eval scenarios — deterministic, zero API calls.
+      # Nonzero exit on any hard-check failure fails this job.
+      - name: Run fast eval harness
+        run: python -m evals.run --fast

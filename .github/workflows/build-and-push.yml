@@ -1,0 +1,114 @@
+# Not yet exercised against a real Actions run — verify action
+# versions before relying on this.
+name: Build and push FinOps Copilot agent image
+
+# Development happens on `dev` (or feature branches) and goes through a
+# PR for review. This workflow only runs AFTER a PR is merged into
+# `main` and that merge touched agent_code/ — nothing runs
+# automatically on `dev` pushes, and infra-only or doc-only changes to
+# main don't trigger a rebuild either.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "agent_code/**"
+
+# Needs write access this time, since this workflow opens a PR with the
+# updated manifest rather than just reading code / pushing an image.
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Keyless — no service-account key ever stored in GitHub. Names
+      # only; values live in this repo's GitHub Variables/Secrets.
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      # Idempotent: `describe` is a cheap existence check, `create` only
+      # runs the one time the repo doesn't exist yet. Needs the WIF
+      # service account to hold artifactregistry.repositories.create
+      # and .get (e.g. roles/artifactregistry.admin).
+      - name: Ensure Artifact Registry repo exists
+        run: |
+          if ! gcloud artifacts repositories describe "${{ vars.ARTIFACT_REGISTRY_REPO }}" \
+            --project="${{ vars.GCP_PROJECT_ID }}" \
+            --location="${{ vars.GCP_REGION }}" >/dev/null 2>&1; then
+            gcloud artifacts repositories create "${{ vars.ARTIFACT_REGISTRY_REPO }}" \
+              --project="${{ vars.GCP_PROJECT_ID }}" \
+              --location="${{ vars.GCP_REGION }}" \
+              --repository-format=docker \
+              --description="FinOps Copilot agent container images"
+          fi
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      # Tag the image with the commit SHA so every build is traceable
+      # back to an exact commit — easier to answer "which code is
+      # running?" than reusing a fixed tag like :latest every time.
+      - name: Build and push image
+        run: |
+          IMAGE="${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPO }}/finops-copilot-agent:${{ github.sha }}"
+          docker build -t "$IMAGE" ./agent_code
+          docker push "$IMAGE"
+          echo "Pushed: $IMAGE"
+
+      # Rewrite the image line in the manifest to point at the image we
+      # just pushed, so the file in git always reflects what's actually
+      # meant to be deployed — matches on the image name itself
+      # (finops-copilot-agent), not a magic placeholder token, so it
+      # works whether the current line holds the bootstrap value or a
+      # previously deployed real tag.
+      - name: Patch deployment manifest with new image tag
+        run: |
+          IMAGE="${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPO }}/finops-copilot-agent:${{ github.sha }}"
+          sed -i "s|image: .*/finops-copilot-agent:.*|image: ${IMAGE}|" infra/api/api-deployment.yaml
+          grep "image:" infra/api/api-deployment.yaml
+
+      # Instead of committing straight to main (which branch protection
+      # would likely block, and which would bypass review entirely for
+      # an automated change), the bot pushes its own short-lived branch
+      # and opens a PR. Every change to main — human or automated —
+      # goes through the same review gate. Merging this PR is what
+      # actually triggers sync-manifest-to-cluster.yml.
+      - name: Open PR with updated manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          BRANCH="ci/update-image-${{ github.sha }}"
+          git checkout -b "$BRANCH"
+          git add infra/api/api-deployment.yaml
+
+          # If the image tag didn't actually change (e.g. a re-run),
+          # skip opening a PR entirely rather than creating an empty one.
+          if git diff --cached --quiet; then
+            echo "No manifest changes — skipping PR."
+            exit 0
+          fi
+
+          git commit -m "ci: update finops-copilot-agent image to ${{ github.sha }}"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "ci: update finops-copilot-agent image to ${{ github.sha }}" \
+            --body "Automated image tag bump from build-and-push.yml. Merging this will trigger sync-manifest-to-cluster.yml."

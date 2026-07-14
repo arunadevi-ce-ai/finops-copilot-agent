@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: finops-redis
+  namespace: finops-copilot
+spec:
+  type: ClusterIP
+  selector:
+    app: finops-redis
+  ports:
+    - port: 6379
+      targetPort: 6379

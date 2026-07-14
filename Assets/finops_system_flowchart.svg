@@ -1,0 +1,179 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 1150" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <style>
+    .flow-arrow { stroke-dasharray: 6 5; animation: dashflow 0.9s linear infinite; }
+    @keyframes dashflow { to { stroke-dashoffset: -11; } }
+    .pulse-gate { animation: gatepulse 1.8s ease-in-out infinite; }
+    @keyframes gatepulse {
+      0%, 100% { stroke-width: 1.5; stroke-opacity: 1; }
+      50% { stroke-width: 3.5; stroke-opacity: 0.55; }
+    }
+  </style>
+
+  <rect x="0" y="0" width="1180" height="1150" fill="#ffffff"/>
+
+  <text x="590" y="26" text-anchor="middle" font-size="18" font-weight="bold" fill="#212121">FinOps Copilot — full system flow (verified live on GKE)</text>
+
+  <!-- Legend -->
+  <g font-size="10.5" fill="#212121">
+    <rect x="60" y="40" width="14" height="14" rx="3" fill="#E8EAF6" stroke="#3F51B5"/>
+    <text x="80" y="51">entry point</text>
+    <rect x="230" y="40" width="14" height="14" rx="3" fill="#F3E5F5" stroke="#7B1FA2"/>
+    <text x="250" y="51">core component</text>
+    <rect x="420" y="40" width="14" height="14" rx="3" fill="#E0F7FA" stroke="#00838F"/>
+    <text x="440" y="51">event pipeline (Kafka)</text>
+    <rect x="640" y="40" width="14" height="14" rx="3" fill="#FFEBEE" stroke="#C62828"/>
+    <text x="660" y="51">human gate</text>
+    <rect x="810" y="40" width="14" height="14" rx="3" fill="#E8F5E9" stroke="#2E7D32"/>
+    <text x="830" y="51">metrics / infra</text>
+  </g>
+
+  <!-- ===================== ZONE 1: TRIGGER ===================== -->
+  <line x1="20" y1="58" x2="1160" y2="58" stroke="#CCCCCC" stroke-width="1"/>
+  <text x="30" y="76" font-size="13" font-weight="bold" fill="#424242">① TRIGGER — how a run starts</text>
+
+  <rect x="30" y="90" width="340" height="110" fill="#E8EAF6" stroke="#3F51B5" stroke-width="1.5"/>
+  <text x="200" y="110" text-anchor="middle" font-size="12" font-weight="bold" fill="#212121">A. Direct Python</text>
+  <text x="200" y="130" text-anchor="middle" font-size="11" fill="#212121">python detector.py</text>
+  <text x="200" y="148" text-anchor="middle" font-size="11" fill="#212121">python orchestrator.py</text>
+  <text x="200" y="168" text-anchor="middle" font-size="9.5" fill="#616161">(both call run_detector() first)</text>
+
+  <rect x="420" y="90" width="340" height="110" fill="#E8EAF6" stroke="#3F51B5" stroke-width="1.5"/>
+  <text x="590" y="108" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#212121">B. MCP client (Claude Desktop)</text>
+  <text x="590" y="126" text-anchor="middle" font-size="10.5" fill="#212121">mcp_server.py serves 3 tools:</text>
+  <text x="590" y="142" text-anchor="middle" font-size="9.5" fill="#212121">• get_cost_anomalies → detector.py</text>
+  <text x="590" y="157" text-anchor="middle" font-size="9.5" fill="#212121">• search_finops_policy → rag.py</text>
+  <text x="590" y="172" text-anchor="middle" font-size="9.5" fill="#212121">• propose_rightsizing → full pipeline</text>
+
+  <rect x="810" y="90" width="340" height="110" fill="#E8EAF6" stroke="#3F51B5" stroke-width="1.5"/>
+  <text x="980" y="108" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#212121">C. REST API (agent_code/api.py)</text>
+  <text x="980" y="126" text-anchor="middle" font-size="10.5" fill="#212121">POST /propose {resource_name}</text>
+  <text x="980" y="142" text-anchor="middle" font-size="9.5" fill="#212121">→ finds resource, runs orchestrator.py</text>
+  <text x="980" y="157" text-anchor="middle" font-size="9.5" fill="#212121">up to interrupt(); returns approval_token</text>
+  <text x="980" y="174" text-anchor="middle" font-size="9" fill="#616161">GET /health, GET /anomalies also exposed</text>
+
+  <!-- ===================== ZONE 2: DETECT + GROUND ===================== -->
+  <line x1="20" y1="222" x2="1160" y2="222" stroke="#CCCCCC" stroke-width="1"/>
+  <text x="30" y="240" font-size="13" font-weight="bold" fill="#424242">② DETECT + GROUND</text>
+
+  <rect x="140" y="254" width="380" height="100" fill="#F3E5F5" stroke="#7B1FA2" stroke-width="1.5"/>
+  <text x="330" y="276" text-anchor="middle" font-size="13" font-weight="bold" fill="#212121">detector.py</text>
+  <text x="330" y="296" text-anchor="middle" font-size="11" fill="#212121">run_detector(): 5 mechanical checks</text>
+  <text x="330" y="313" text-anchor="middle" font-size="10.5" fill="#212121">→ list[Finding] (category, resource, evidence)</text>
+  <text x="330" y="332" text-anchor="middle" font-size="9.5" fill="#616161">no policy awareness — flags the DR-volume trap too</text>
+
+  <rect x="660" y="254" width="380" height="100" fill="#F3E5F5" stroke="#7B1FA2" stroke-width="1.5"/>
+  <text x="850" y="276" text-anchor="middle" font-size="13" font-weight="bold" fill="#212121">rag.py</text>
+  <text x="850" y="296" text-anchor="middle" font-size="11" fill="#212121">retrieve(query) → best-matching policy doc</text>
+  <text x="850" y="313" text-anchor="middle" font-size="10.5" fill="#212121">get_document_chunks(doc) → full sections</text>
+  <text x="850" y="332" text-anchor="middle" font-size="9.5" fill="#616161">embedded Chroma, bundled model — no API key</text>
+
+  <!-- ===================== ZONE 3: EVENT PIPELINE (KAFKA) ===================== -->
+  <line x1="20" y1="376" x2="1160" y2="376" stroke="#CCCCCC" stroke-width="1"/>
+  <text x="30" y="394" font-size="13" font-weight="bold" fill="#424242">③ EVENT PIPELINE — Kafka (billing.anomaly.detected)</text>
+
+  <rect x="30" y="410" width="250" height="96" fill="#E0F7FA" stroke="#00838F" stroke-width="1.5"/>
+  <text x="155" y="430" text-anchor="middle" font-size="11" font-weight="bold" fill="#212121">watcher.py (producer)</text>
+  <text x="155" y="447" text-anchor="middle" font-size="9.5" fill="#212121">reads run_detector() findings,</text>
+  <text x="155" y="461" text-anchor="middle" font-size="9.5" fill="#212121">filters to utilization-signal</text>
+  <text x="155" y="475" text-anchor="middle" font-size="9.5" fill="#212121">categories, publishes to Kafka</text>
+
+  <rect x="310" y="410" width="380" height="96" fill="#E0F7FA" stroke="#00838F" stroke-width="1.5"/>
+  <text x="500" y="432" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#212121">Kafka (Bitnami, KRaft mode)</text>
+  <text x="500" y="452" text-anchor="middle" font-size="11" fill="#212121">topic: billing.anomaly.detected</text>
+  <text x="500" y="472" text-anchor="middle" font-size="9.5" fill="#616161">single broker; verified live producer + 2 consumers</text>
+
+  <rect x="720" y="410" width="430" height="44" fill="#E0F7FA" stroke="#00838F" stroke-width="1.5"/>
+  <text x="935" y="426" text-anchor="middle" font-size="10" font-weight="bold" fill="#212121">consumer_orchestrator.py</text>
+  <text x="935" y="440" text-anchor="middle" font-size="9" fill="#212121">→ rebuilds Finding, runs orchestrator.py, mints approval token</text>
+
+  <rect x="720" y="462" width="430" height="44" fill="#E0F7FA" stroke="#00838F" stroke-width="1.5"/>
+  <text x="935" y="478" text-anchor="middle" font-size="10" font-weight="bold" fill="#212121">consumer_dashboard_counter.py</text>
+  <text x="935" y="492" text-anchor="middle" font-size="9" fill="#212121">→ increments finops_anomalies_detected_total</text>
+
+  <!-- ===================== ZONE 4: MULTI-AGENT REASONING ===================== -->
+  <line x1="20" y1="528" x2="1160" y2="528" stroke="#CCCCCC" stroke-width="1"/>
+  <text x="30" y="546" font-size="13" font-weight="bold" fill="#424242">④ MULTI-AGENT REASONING — orchestrator.py</text>
+
+  <rect x="240" y="562" width="700" height="130" fill="#F3E5F5" stroke="#7B1FA2" stroke-width="1.5"/>
+  <text x="590" y="584" text-anchor="middle" font-size="13" font-weight="bold" fill="#212121">orchestrator.py — run_for_finding(finding)</text>
+  <text x="590" y="604" text-anchor="middle" font-size="11" fill="#212121">investigation_agent → retrieval_agent (calls rag.py) →</text>
+  <text x="590" y="620" text-anchor="middle" font-size="11" fill="#212121">recommendation_agent → human_approval(interrupt())</text>
+  <text x="590" y="638" text-anchor="middle" font-size="10.5" fill="#212121">cross-checks resource metadata against retrieved policy —</text>
+  <text x="590" y="654" text-anchor="middle" font-size="10.5" fill="#212121">downgrades to manual review instead of proposing deletion</text>
+  <text x="590" y="674" text-anchor="middle" font-size="9.5" fill="#616161">invoked directly by A/B/C, and by consumer_orchestrator.py for the Kafka path</text>
+
+  <!-- ===================== ZONE 5: HUMAN GATE ===================== -->
+  <line x1="20" y1="714" x2="1160" y2="714" stroke="#CCCCCC" stroke-width="1"/>
+  <text x="30" y="732" font-size="13" font-weight="bold" fill="#424242">⑤ HUMAN APPROVAL GATE</text>
+
+  <rect class="pulse-gate" x="240" y="746" width="700" height="70" fill="#FFEBEE" stroke="#C62828" stroke-width="1.5"/>
+  <text x="590" y="768" text-anchor="middle" font-size="13" font-weight="bold" fill="#212121">Human approval gate</text>
+  <text x="590" y="788" text-anchor="middle" font-size="9.5" fill="#212121">interrupt() pauses the graph; Redis (approvals.py) holds a one-time token until</text>
+  <text x="590" y="802" text-anchor="middle" font-size="9.5" fill="#212121">Command(resume=...) or POST /confirm applies the human's decision</text>
+
+  <!-- ===================== ZONE 6: OBSERVABILITY ===================== -->
+  <line x1="20" y1="838" x2="1160" y2="838" stroke="#CCCCCC" stroke-width="1"/>
+  <text x="30" y="856" font-size="13" font-weight="bold" fill="#424242">⑥ OBSERVABILITY — metrics.py → Prometheus → Grafana</text>
+
+  <rect x="370" y="872" width="440" height="60" fill="#E8F5E9" stroke="#2E7D32" stroke-width="1.5"/>
+  <text x="590" y="894" text-anchor="middle" font-size="12" font-weight="bold" fill="#212121">metrics.py — prometheus_client</text>
+  <text x="590" y="912" text-anchor="middle" font-size="10" fill="#212121">exposes /metrics on :8000 — updated by detector.py and both Kafka consumers</text>
+
+  <rect x="370" y="944" width="440" height="60" fill="#E8F5E9" stroke="#2E7D32" stroke-width="1.5"/>
+  <text x="590" y="966" text-anchor="middle" font-size="12" font-weight="bold" fill="#212121">Prometheus (infra/monitoring)</text>
+  <text x="590" y="984" text-anchor="middle" font-size="10" fill="#212121">kube-prometheus-stack scrapes /metrics via ServiceMonitor</text>
+
+  <rect x="370" y="1016" width="440" height="60" fill="#E8F5E9" stroke="#2E7D32" stroke-width="1.5"/>
+  <text x="590" y="1038" text-anchor="middle" font-size="12" font-weight="bold" fill="#212121">Grafana (same Helm release)</text>
+  <text x="590" y="1056" text-anchor="middle" font-size="10" fill="#212121">dashboard-configmap.yaml renders finops-dashboard.json's 4 panels</text>
+
+  <!-- ===== Arrows ===== -->
+
+  <!-- Zone1 -> detector.py -->
+  <line class="flow-arrow" x1="200" y1="200" x2="230" y2="254" stroke="#3F51B5" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line class="flow-arrow" x1="590" y1="200" x2="400" y2="254" stroke="#3F51B5" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line class="flow-arrow" x1="980" y1="200" x2="470" y2="254" stroke="#3F51B5" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- detector.py -> orchestrator.py (direct paths, routed clear of zone 3) -->
+  <polyline class="flow-arrow" points="520,354 520,378 705,378 705,562" fill="none" stroke="#3F51B5" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="535" y="372" font-size="8" fill="#3F51B5">direct / MCP / REST API → orchestrator.py</text>
+
+  <!-- rag.py <-> orchestrator.py -->
+  <polyline class="flow-arrow" points="850,354 850,360 295,360 295,536 590,536 590,562" fill="none" stroke="#7B1FA2" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="295" y="470" font-size="8" fill="#7B1FA2" transform="rotate(-90 295 470)" text-anchor="middle">used by retrieval_agent</text>
+
+  <!-- detector.py -> watcher.py -->
+  <line class="flow-arrow" x1="200" y1="354" x2="160" y2="410" stroke="#7B1FA2" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="35" y="400" font-size="8.5" fill="#7B1FA2">utilization-signal findings only</text>
+
+  <!-- watcher.py -> Kafka topic -->
+  <line class="flow-arrow" x1="280" y1="458" x2="310" y2="458" stroke="#00838F" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Kafka topic -> 2 consumers -->
+  <line class="flow-arrow" x1="690" y1="432" x2="720" y2="432" stroke="#00838F" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line class="flow-arrow" x1="690" y1="484" x2="720" y2="484" stroke="#00838F" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- consumer_orchestrator.py -> orchestrator.py (routed along the right margin) -->
+  <polyline class="flow-arrow" points="1150,432 1165,432 1165,610 940,610" fill="none" stroke="#00838F" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="1165" y="520" font-size="8" fill="#00838F" transform="rotate(-90 1165 520)" text-anchor="middle">Kafka path also reaches orchestrator.py</text>
+
+  <!-- orchestrator.py -> human approval gate -->
+  <line class="flow-arrow" x1="590" y1="692" x2="590" y2="746" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- human approval gate -> metrics.py -->
+  <line class="flow-arrow" x1="590" y1="816" x2="590" y2="872" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- metrics.py -> Prometheus -> Grafana -->
+  <line class="flow-arrow" x1="590" y1="932" x2="590" y2="944" stroke="#2E7D32" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line class="flow-arrow" x1="590" y1="1004" x2="590" y2="1016" stroke="#2E7D32" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Caption -->
+  <text x="590" y="1105" text-anchor="middle" font-size="11" fill="#555">Direct Python, MCP, and the REST API all call detector.py then orchestrator.py in-process. The Kafka path is separate:</text>
+  <text x="590" y="1123" text-anchor="middle" font-size="11" fill="#555">detector.py's utilization-signal findings are published, then a dedicated consumer replays them through the same orchestrator.py pipeline — every path ends at the same human approval gate.</text>
+</svg>

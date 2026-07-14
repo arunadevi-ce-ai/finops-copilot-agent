@@ -1,0 +1,78 @@
+# Helm values for the kube-prometheus-stack chart. See README.md for
+# the full install sequence.
+
+# Only Prometheus + Grafana are needed here — alertmanager,
+# node-exporter, and kube-state-metrics monitor node/cluster health,
+# not the FinOps copilot's own findings, so they're off.
+alertmanager:
+  enabled: false
+nodeExporter:
+  enabled: false
+kubeStateMetrics:
+  enabled: false
+
+# These try to create Service/Endpoints objects in kube-system to
+# scrape the cluster's control-plane components (etcd, scheduler,
+# controller-manager, kube-proxy, coredns). On GKE, Google runs the
+# control plane itself — none of that is reachable this way — and on
+# Autopilot specifically, kube-system is a managed namespace: any
+# write to it is rejected outright ("denied by
+# managed-namespaces-limitation"), which fails the whole install if
+# these are left at their default of enabled.
+coreDns:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+grafana:
+  # No adminPassword set on purpose — the chart auto-generates one and
+  # stores it in a Secret instead of leaving a real password sitting in
+  # a values file. Retrieve it with:
+  #   kubectl get secret kube-prometheus-stack-grafana -n finops-copilot \
+  #     -o jsonpath="{.data.admin-password}" | base64 -d
+
+  sidecar:
+    dashboards:
+      # A sidecar container in the Grafana pod watches for ConfigMaps
+      # with this label and loads each one as a dashboard.
+      enabled: true
+      label: grafana_dashboard
+
+  # Required on GKE Autopilot — this chart leaves Grafana's resources
+  # unset by default (unlike Bitnami's Kafka chart, which had presets).
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 250m
+      memory: 384Mi
+
+# Same Autopilot requirement for the Prometheus Operator's own Deployment.
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 250m
+      memory: 384Mi
+
+# And for the actual Prometheus pod the operator creates from the
+# Prometheus custom resource — prometheusSpec.resources is the
+# standard field for this, not a chart-level top-level "resources" key.
+prometheus:
+  prometheusSpec:
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 768Mi

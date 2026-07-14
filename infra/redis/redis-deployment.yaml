@@ -1,0 +1,46 @@
+# redis/redis-stack-server, not plain redis:7-alpine — orchestrator.py's
+# RedisSaver (via redisvl) needs the RediSearch module (FT.* commands)
+# to create and check its checkpoint index; vanilla Redis doesn't have
+# it and setup() fails with "unknown command 'FT._LIST'".
+#
+# No auth (no --requirepass) and no PVC. The Service is ClusterIP-only
+# (never reached outside the cluster); losing in-flight approval tokens
+# on a pod restart is an accepted risk at this scale. See README.md for
+# what's confirmed vs. still worth checking before applying.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finops-redis
+  namespace: finops-copilot
+  labels:
+    app: finops-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: finops-redis
+  template:
+    metadata:
+      labels:
+        app: finops-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis/redis-stack-server:latest
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 250m
+              memory: 512Mi
+          readinessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 2
+          livenessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 5

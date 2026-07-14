@@ -1,0 +1,204 @@
+# GENERATED from grafana/finops-dashboard.json — if that file changes,
+# regenerate this one rather than hand-editing the embedded JSON below:
+#
+#   kubectl create configmap finops-copilot-dashboard \
+#     --from-file=finops-dashboard.json=../../grafana/finops-dashboard.json \
+#     --namespace finops-copilot --dry-run=client -o yaml \
+#     > dashboard-configmap.yaml
+#
+# (then re-add the `labels:` block under metadata — kubectl create
+# --dry-run doesn't have a flag for labels, so this file must always
+# have the grafana_dashboard label re-applied after regenerating)
+apiVersion: v1
+data:
+  finops-dashboard.json: |
+    {
+      "title": "FinOps Copilot",
+      "uid": "finops-copilot",
+      "description": "Findings, proposals, and confirmation status from detector.py and orchestrator.py. No pipeline-health panel (latency/error-rate) — this dashboard measures the copilot's decisions, not its own operational health.",
+      "tags": ["finops"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "editable": true,
+      "refresh": "30s",
+      "time": { "from": "now-24h", "to": "now" },
+      "templating": {
+        "list": [
+          {
+            "name": "DS_PROMETHEUS",
+            "type": "datasource",
+            "query": "prometheus",
+            "label": "Prometheus datasource",
+            "current": {}
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Total Projected Savings",
+          "description": "sum(finops_projected_savings_dollars_total) — cumulative dollar amount named across every recommendation proposed so far, regardless of approve/reject/manual-review outcome.",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "gridPos": { "x": 0, "y": 0, "w": 6, "h": 8 },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+              "expr": "sum(finops_projected_savings_dollars_total)",
+              "legendFormat": "Total projected savings",
+              "refId": "A",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "decimals": 2,
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [{ "color": "green", "value": null }]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 2,
+          "title": "Anomalies Detected Over Time",
+          "description": "sum by (anomaly_type) (finops_anomalies_detected_total) — one line per anomaly category, from detector.run_detector().",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "gridPos": { "x": 6, "y": 0, "w": 18, "h": 8 },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+              "expr": "sum by (anomaly_type) (finops_anomalies_detected_total)",
+              "legendFormat": "{{anomaly_type}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "stepAfter",
+                "fillOpacity": 10,
+                "showPoints": "always",
+                "spanNulls": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          }
+        },
+        {
+          "id": 3,
+          "title": "Recommendations by Status",
+          "description": "sum by (status) (finops_recommendations_total) — proposed / approved / rejected. A DR-volume-style manual-review downgrade shows up as 'rejected', not a separate status — see metrics.py's docstring.",
+          "type": "barchart",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+              "expr": "sum by (status) (finops_recommendations_total)",
+              "legendFormat": "{{status}}",
+              "refId": "A",
+              "instant": true,
+              "format": "table"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "palette-classic" }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "proposed" },
+                "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "approved" },
+                "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "rejected" },
+                "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+              }
+            ]
+          },
+          "options": {
+            "orientation": "horizontal",
+            "xTickLabelRotation": 0,
+            "showValue": "always",
+            "legend": { "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "single" }
+          },
+          "transformations": [
+            { "id": "labelsToFields", "options": { "mode": "columns" } }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Open Recommendations",
+          "description": "finops_open_recommendations{anomaly_type,team} — recommendations currently awaiting resolution (human approval via interrupt(), or already auto-rejected to manual review). One row per (team, anomaly_type) still open right now.",
+          "type": "table",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+              "expr": "finops_open_recommendations > 0",
+              "refId": "A",
+              "instant": true,
+              "format": "table"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "short" },
+            "overrides": [
+              { "matcher": { "id": "byName", "options": "Value" }, "properties": [{ "id": "displayName", "value": "Open count" }] },
+              { "matcher": { "id": "byName", "options": "team" }, "properties": [{ "id": "displayName", "value": "Team" }] },
+              { "matcher": { "id": "byName", "options": "anomaly_type" }, "properties": [{ "id": "displayName", "value": "Anomaly type" }] }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm"
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": { "Time": true, "__name__": true, "instance": true, "job": true },
+                "indexByName": {},
+                "renameByName": {}
+              }
+            }
+          ]
+        }
+      ]
+    }
+kind: ConfigMap
+metadata:
+  name: finops-copilot-dashboard
+  namespace: finops-copilot
+  labels:
+    # Grafana's sidecar loader watches for this label and loads the
+    # ConfigMap as a dashboard — no manual UI import needed.
+    grafana_dashboard: "1"

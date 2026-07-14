@@ -1,0 +1,21 @@
+# Build context only — these are still generated inside the image by
+# the Dockerfile's RUN step, this just keeps them out of the upload.
+.git/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+evals/results/*.json
+Assets/
+.env
+data/billing/
+data/chroma/
+.claude/
+grafana/
+infra/
+mcp_server.py
+test_*.py
+*.md

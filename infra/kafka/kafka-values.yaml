@@ -1,0 +1,71 @@
+# Helm values for the bitnami/kafka chart. KRaft mode (this chart's
+# default — no ZooKeeper), single combined controller+broker node.
+# Enough to prove the producer/consumer/topic plumbing works, not a
+# durability-tested setup.
+#
+# Resource requests (required on GKE Autopilot) are already handled by
+# this chart's own resourcesPreset defaults (controller: "small", init
+# containers: "nano") — confirmed via `helm show values bitnami/kafka`,
+# not left unset like Strimzi's chart. No override needed here.
+
+# The chart's default image.tag (4.0.0-debian-12-r10 at the time this
+# was written) has been pulled from the free docker.io/bitnami/*
+# namespace — Broadcom moved older pinned tags to a paid "Bitnami
+# Secure Images" tier after acquiring Bitnami. bitnamilegacy/* is
+# Broadcom's read-only archive of the old free-tier tags. Confirmed
+# via a live ErrImagePull ("not found") on the original image, not a
+# guess — but bitnamilegacy's own long-term availability isn't
+# guaranteed either; if this also 404s, check
+# https://hub.docker.com/r/bitnamilegacy/kafka/tags for what's
+# actually still there, or switch to the official apache/kafka image
+# instead of a Bitnami chart entirely.
+image:
+  registry: docker.io
+  repository: bitnamilegacy/kafka
+
+controller:
+  replicaCount: 1
+  # controllerOnly defaults to false, meaning this single node runs as
+  # a combined controller+broker process — no separate broker pool
+  # needed (broker.replicaCount stays at its default of 0).
+  persistence:
+    size: 5Gi
+  # Internal topics (__consumer_offsets, __transaction_state) default
+  # to replication factor 3 — impossible to satisfy with 1 broker.
+  # KAFKA_CFG_* is the standard Bitnami image env-var convention for
+  # arbitrary server.properties overrides.
+  #
+  # auto.create.topics.enable defaults to false on this chart, which
+  # was the actual root cause of consumer groups never working at all:
+  # __consumer_offsets never got created (nothing auto-creates it),
+  # so no consumer group could ever fetch or commit an offset — produce
+  # still worked fine, since that path doesn't touch __consumer_offsets.
+  # Confirmed live: manually creating __consumer_offsets (50 partitions,
+  # replication factor 1, cleanup.policy=compact — Kafka's own defaults
+  # for that topic) immediately unblocked consumption of previously
+  # "invisible" messages. This flag makes that automatic instead of a
+  # manual step on every fresh install.
+  extraEnvVars:
+    - name: KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR
+      value: "1"
+    - name: KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+      value: "1"
+    - name: KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR
+      value: "1"
+    - name: KAFKA_CFG_DEFAULT_REPLICATION_FACTOR
+      value: "1"
+    - name: KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE
+      value: "true"
+
+# Chart defaults every listener to SASL_PLAINTEXT. Switched to plain
+# PLAINTEXT to match this project's existing internal-only, no-auth
+# stance (same as Redis) — avoids adding SASL credential handling to
+# the confluent-kafka client code for a cluster nothing outside the
+# namespace can reach anyway.
+listeners:
+  client:
+    protocol: PLAINTEXT
+  controller:
+    protocol: PLAINTEXT
+  interbroker:
+    protocol: PLAINTEXT

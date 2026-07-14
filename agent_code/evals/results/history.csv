@@ -1,0 +1,4 @@
+timestamp,git_sha,n_scenarios,n_hard_pass,n_hard_fail,citation_in_acceptable_set,retrieval_top1,retrieval_top3
+2026-07-10T15:30:34.263281+00:00,,9,9,0,1.0,1.0,1.0
+2026-07-11T00:23:28.184558+00:00,,9,9,0,,,
+2026-07-11T00:50:49.027380+00:00,,9,9,0,,,

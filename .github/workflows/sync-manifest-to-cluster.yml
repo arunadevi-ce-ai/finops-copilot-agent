@@ -1,0 +1,57 @@
+# Not yet exercised against a real Actions run — verify action
+# versions before relying on this.
+name: Sync manifests to cluster
+
+# Fires when a manifest change lands on main — either the automated
+# image-tag-bump PR from build-and-push.yml gets merged, or a human
+# edits something under infra/ directly (a probe count, a resource
+# limit) and that PR gets merged. Either way, main's state and the
+# cluster's state are meant to match after this runs.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/redis/**"
+      - "infra/api/**"
+
+permissions:
+  contents: read
+  id-token: write  # required for keyless WIF auth
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ vars.GKE_CLUSTER_NAME }}
+          location: ${{ vars.GKE_CLUSTER_LOCATION }}
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      # infra/api/api-deployment.yaml already holds the real image tag
+      # at this point — build-and-push.yml patched it and that change
+      # went through a merged PR to get here. No sed, no substitution:
+      # what's in git is exactly what gets applied.
+      #
+      # OPENAI_API_KEY is never referenced here. It lives in the
+      # finops-copilot-secrets K8s Secret, created once, out-of-band,
+      # by hand (see infra/api/README.md) — this pipeline neither
+      # reads nor writes it.
+      - name: Apply manifests
+        run: |
+          kubectl apply -f infra/redis/redis-deployment.yaml
+          kubectl apply -f infra/redis/redis-service.yaml
+          kubectl apply -f infra/api/api-deployment.yaml
+          kubectl apply -f infra/api/api-service.yaml
+          kubectl rollout status deployment/finops-copilot-api -n finops-copilot --timeout=120s
