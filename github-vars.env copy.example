@@ -1,0 +1,20 @@
+# Copy this to github-vars.env and fill in real values.
+# github-vars.env is gitignored — never commit it.
+#
+# github-repo-setup.sh sources this file if it exists, and uses
+# whatever's set here as the pre-filled default in each prompt — you
+# still see and confirm (or override) every value before anything gets
+# applied to GitHub. Leave a line out entirely (or commented) to fall
+# back to gcloud auto-detection instead.
+
+GCP_PROJECT_ID=""
+GCP_REGION=""
+ARTIFACT_REGISTRY_REPO=""
+GKE_CLUSTER_NAME=""
+GKE_CLUSTER_LOCATION=""
+
+# These two are resource identifiers, not passwords (see
+# github-repo-setup.sh's own comment on why that's fine to keep here
+# instead of only ever hidden-prompting) — still gitignored regardless.
+WIF_PROVIDER=""
+WIF_SERVICE_ACCOUNT=""

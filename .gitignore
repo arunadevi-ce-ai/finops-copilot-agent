@@ -50,8 +50,11 @@ INTERVIEW_PREP.md
 # --- Local-only deploy script, kept out of the public repo on purpose ---
 deploy.sh
 
-# --- Personal GitHub setup reference script, not project documentation ---
+# --- Personal GitHub setup reference scripts, not project documentation ---
 github-repo-setup.sh
+github-vars-setup.sh
+github-vars.env
+!github-vars.env.example
 
 # --- Live-debugging scratch output (verify-*.sh scripts, curl dumps —
 # regenerable by re-running the script, not something to track) ---

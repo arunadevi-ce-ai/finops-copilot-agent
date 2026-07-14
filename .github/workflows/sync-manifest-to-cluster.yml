@@ -48,10 +48,28 @@ jobs:
       # finops-copilot-secrets K8s Secret, created once, out-of-band,
       # by hand (see infra/api/README.md) — this pipeline neither
       # reads nor writes it.
-      - name: Apply manifests
+      #
+      # Only applies whichever of redis/ or api/ actually changed in
+      # this push — most merges only touch api-deployment.yaml's image
+      # tag, so there's no reason to re-apply Redis's manifests (or
+      # wait on its rollout) every single time too.
+      - name: Apply manifests for changed components only
         run: |
-          kubectl apply -f infra/redis/redis-deployment.yaml
-          kubectl apply -f infra/redis/redis-service.yaml
-          kubectl apply -f infra/api/api-deployment.yaml
-          kubectl apply -f infra/api/api-service.yaml
-          kubectl rollout status deployment/finops-copilot-api -n finops-copilot --timeout=120s
+          CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
+
+          if echo "$CHANGED" | grep -q '^infra/redis/'; then
+            echo "infra/redis/ changed — applying Redis manifests"
+            kubectl apply -f infra/redis/redis-deployment.yaml
+            kubectl apply -f infra/redis/redis-service.yaml
+          else
+            echo "infra/redis/ unchanged — skipping"
+          fi
+
+          if echo "$CHANGED" | grep -q '^infra/api/'; then
+            echo "infra/api/ changed — applying API manifests"
+            kubectl apply -f infra/api/api-deployment.yaml
+            kubectl apply -f infra/api/api-service.yaml
+            kubectl rollout status deployment/finops-copilot-api -n finops-copilot --timeout=300s
+          else
+            echo "infra/api/ unchanged — skipping"
+          fi
