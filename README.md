@@ -1,6 +1,6 @@
 # FinOps Copilot
 
-An agent that catches wasted cloud spend, checks it against written company policy before suggesting anything, and never acts without a human saying yes first.
+An agent that catches wasted cloud spend, checks it against real company policy before suggesting anything, and never touches a resource without a human saying yes first.
 
 ## Why I built this
 
@@ -8,63 +8,29 @@ Cost anomaly detection by itself is easy: flag anything idle, flag anything unat
 
 So this project is built around that specific failure mode. A cheap, deterministic rule-based layer finds anomalies. A separate reasoning layer checks each one against real policy documents before deciding what to recommend, and it has to cite the exact policy section it's relying on. Nothing gets deleted, resized, or touched without a human approving it, and that approval has to survive a crash or getting picked up by a completely different process. It runs on a real GKE cluster, with a real event pipeline behind it, not just on my laptop.
 
+## What it does
+
+`detector.py` reads billing, utilization, and inventory data and flags anomalies across five categories — idle compute, orphaned disks, orphaned static IPs, cost spikes, stale storage. It has zero policy awareness by design. Left alone it'll happily flag a disaster-recovery volume for deletion, which is the whole point — something downstream has to catch that.
+
+That something is `orchestrator.py`, a four-step LangGraph pipeline. One step decides whether a finding is actually worth pursuing. Another searches Chroma and pulls the *whole* matching policy document, not just the closest chunk, so a short "precedent" section can't get lost. A third checks the resource's metadata against that policy text — if it matches a documented exception, the recommendation downgrades to "flag for manual review" instead of proposing something destructive. The last step just stops and waits. Nothing is final until a person resumes it, and that resume can come from a completely different process than the one that paused, because the state and the one-time approval token both live in Redis.
+
+There are four ways to kick off a run and they all land in the same pipeline: running `detector.py` / `orchestrator.py` directly, calling the REST API, asking an MCP client (Claude Desktop, Claude Code) to use `propose_rightsizing`, or letting a Kafka event trigger it when a resource's utilization breaches a threshold.
+
+Every finding and every recommendation also emits a Prometheus metric, which is what shows up on the Grafana dashboard.
+
 ## Architecture
 
 ![FinOps Copilot system flow](Assets/finops_system_flowchart.svg)
 
-| Component | File(s) | Status |
-|---|---|---|
-| Anomaly detector | `agent_code/detector.py`, rule-based, 5 categories | Verified live |
-| Policy retrieval (RAG) | `agent_code/rag.py`, Chroma, structure-aware chunking | Verified live |
-| Multi-agent orchestrator | `agent_code/orchestrator.py`, LangGraph: investigate, retrieve, recommend, approval | Verified live |
-| REST API | `agent_code/api.py`: `/anomalies`, `/propose`, `/confirm` | Verified live |
-| MCP tool server | `agent_code/mcp_server.py`, 3 tools, stdio | Built, tested |
-| Event pipeline | `agent_code/events/`, Kafka producer + 2 consumers | Verified live |
-| BigQuery backend | Optional billing/utilization/metadata source | Verified live |
-| Metrics + dashboard | `agent_code/metrics.py` + Grafana | Verified live |
-| Eval harness | `agent_code/evals/`, scenario-based regression checks | Built, tested |
-| Infra | `infra/`: Kafka, Redis, monitoring, API, all on K8s | Verified live |
-| CI/CD | `.github/workflows/`: build/push, manifest sync, PR validation | Written, not run live |
+`detector.py` feeds `orchestrator.py`. Two things can call into that pipeline from the outside — `api.py` (REST) and `mcp_server.py` (MCP over stdio) — and a third path comes in sideways through `events/`, where a Kafka consumer reconstructs a finding from an event and runs the same pipeline. `metrics.py` is wired into all of it and feeds Grafana. Everything under `infra/` is what actually runs this on Kubernetes: Kafka, Redis, monitoring, and the API service.
 
-## How it works
+Every piece above has been run for real against a live GKE cluster, not just locally — including CI/CD itself (a real code change triggered `build-and-push.yml`, which opened a PR, and merging it triggered `sync-manifest-to-cluster.yml`, which deployed the new image).
 
-There are four ways to trigger a run, and they all end up in the same place:
+## Stack
 
-1. **Direct Python** — `python detector.py` or `python orchestrator.py`.
-2. **REST API** — `POST /propose` (`agent_code/api.py`).
-3. **MCP client** (Claude Desktop, etc.) — the `propose_rightsizing` tool.
-4. **Kafka event** — a utilization breach gets published to `billing.anomaly.detected`, and `consumer_orchestrator.py` picks it up.
+Python, LangGraph for the agent graph, OpenAI for the LLM (swappable — see `orchestrator.py`'s `_make_llm()`), Chroma for retrieval (embedded in-process, no separate service to run), Kafka for events (Bitnami's Helm chart, KRaft mode), Redis for state and approval tokens (`redis-stack-server`, needed for RediSearch), Prometheus + Grafana for metrics, MCP's low-level `Server` API for tool access, pytest for testing, Helm charts and raw manifests for infra.
 
-What actually happens once a run starts:
-
-`detector.py` reads billing data (CSV/JSON, or BigQuery) and flags anomalies across 5 categories. It has zero policy awareness. Left alone it will happily flag a disaster-recovery volume for deletion, which is the whole point — something downstream has to catch that.
-
-That something is `orchestrator.py`, a 4-node LangGraph pipeline:
-
-- `investigation_agent` decides whether the evidence actually justifies action and drafts a policy search query.
-- `retrieval_agent` searches Chroma and pulls the *whole* matching policy doc, not just the closest chunk, so a short Precedent section can't get lost.
-- `recommendation_agent` checks the resource's metadata against the policy text. If it matches a documented exception, it downgrades to "flag for manual review" instead of proposing something destructive.
-- `human_approval` calls `interrupt()` and stops. Nothing is final until a person resumes it, either through `Command(resume=...)` or `POST /confirm`. State and one-time approval tokens live in Redis, so whoever resumes it doesn't have to be the same process that paused.
-
-Every finding and every recommendation also emits a Prometheus metric, which is what shows up on the Grafana dashboard.
-
-## Tech stack
-
-| Layer | Technology |
-|---|---|
-| Language | Python 3.11+ |
-| Agent orchestration | LangGraph |
-| LLM | OpenAI, swappable via `orchestrator.py`'s `_make_llm()` |
-| Vector database | Chroma, embedded in-process |
-| Event streaming | Kafka (Bitnami Helm chart, KRaft mode) |
-| State / tokens | Redis (`redis-stack-server`, needed for RediSearch) |
-| Billing data | CSV/JSON, or BigQuery |
-| Metrics | Prometheus + Grafana |
-| Protocol server | MCP, low-level `Server` API |
-| Infrastructure | Helm charts + raw Kubernetes manifests |
-| Testing | `pytest` |
-
-## Project structure
+## Project layout
 
 ```
 finops-copilot/
@@ -98,7 +64,7 @@ finops-copilot/
 
 ## Setup
 
-**Prerequisites:** Python 3.11+, and an OpenAI API key if you want `orchestrator.py` or `mcp_server.py` — `detector.py` and `rag.py` alone don't need one.
+Needs Python 3.11+, and an OpenAI key if you want `orchestrator.py` or `mcp_server.py` — `detector.py` and `rag.py` alone don't need one.
 
 ```bash
 cd agent_code
@@ -113,17 +79,17 @@ python -m pytest -q       # confirm everything works
 
 All commands below run from `agent_code/`.
 
-**Detector alone** (no LLM, no API key needed):
+Just the detector, no LLM or API key needed:
 ```bash
 python detector.py
 ```
 
-**Policy search alone** (also no LLM):
+Just policy search, also no LLM:
 ```bash
 python -c "import rag; [print(r['source_file'], '::', r['section_title']) for r in rag.retrieve('orphaned disk that is actually for disaster recovery', top_k=3)]"
 ```
 
-**Full orchestrator** (needs `OPENAI_API_KEY`):
+The full orchestrator (needs `OPENAI_API_KEY`):
 ```bash
 python orchestrator.py
 ```
@@ -138,13 +104,13 @@ print(result["recommendation"])
 final_state = app.invoke(Command(resume={"approved": True, "approver": "you"}), config=config)
 ```
 
-**REST API** — see `infra/api/README.md` for the deployed version, or run `api.py` locally with `REDIS_URL` set.
+For the REST API, see `infra/api/README.md` for the deployed version, or run `api.py` locally with `REDIS_URL` set.
 
-**MCP server:**
+For the MCP server:
 ```bash
 python mcp_server.py
 ```
-It talks over stdio, so you need to launch it from an MCP client, not run it standalone. Claude Desktop / Claude Code config:
+It talks over stdio, so it needs to be launched by an MCP client, not run standalone. Claude Desktop / Claude Code config:
 ```json
 {
   "mcpServers": {
@@ -159,11 +125,13 @@ It talks over stdio, so you need to launch it from an MCP client, not run it sta
 ```
 Three tools are exposed: `get_cost_anomalies` (calls `detector.run_detector()`), `search_finops_policy` (calls `rag.retrieve()`), and `propose_rightsizing` (calls `orchestrator.run_for_finding()`, up to `interrupt()`). Only the last one touches an LLM.
 
-**Metrics + dashboard:**
+For metrics and the dashboard:
 ```bash
 python -c "import metrics; metrics.start_metrics_server(port=8000)"
 ```
-From there, follow `grafana/README.md` for a local Prometheus + Grafana setup, or `infra/monitoring/README.md` for the real deployment.
+From there, follow `grafana/README.md` for a local Prometheus + Grafana setup, or `infra/monitoring/README.md` for the real deployment. This is what it looks like running against the real cluster:
+
+![FinOps Copilot Grafana dashboard](Assets/Grafana_dashboard.png)
 
 ## Testing
 
@@ -172,17 +140,37 @@ python -m pytest -q                            # everything
 python -m pytest -q -s test_orchestrator.py     # see the actual LLM output
 ```
 
-`test_orchestrator.py`, `test_metrics.py`, and `test_mcp_server.py` make real OpenAI calls on purpose. Mocking the LLM would just be testing that a mock returns what you told it to return. `test_events.py`, `test_watcher.py`, and `test_consumers.py` mock the `confluent_kafka` client instead, since there's no live broker in CI.
+`test_orchestrator.py`, `test_metrics.py`, and `test_mcp_server.py` make real OpenAI calls on purpose — mocking the LLM would just be testing that a mock returns what you told it to return. `test_events.py`, `test_watcher.py`, and `test_consumers.py` mock the `confluent_kafka` client instead, since there's no live broker in CI.
 
-## Mock data and the policy trap
+## The DR-volume trap
 
-`generate_mock_data.py` produces three files under `agent_code/data/billing/`: `billing_export.csv` (9 resources over 14 days), `utilization_metrics.csv` (daily CPU/mem), and `resource_metadata.json` (attachment and last-access facts billing data doesn't carry). They're kept as separate files on purpose, because cost alone can't tell you a resource is idle.
+`generate_mock_data.py` produces three files for 9 resources: a billing export, daily utilization, and inventory metadata (attachment status, last-access date). They're kept separate on purpose — cost alone can't tell you a resource is idle.
 
-One resource, `pd-payments-dr-volume-01`, is the trap I mentioned above. A naive detector flags it for deletion, but it's tagged `purpose=disaster-recovery`, and that matches a documented precedent in `agent_code/data/policies/policy-fin-07-orphaned-resources.md`. Whether the recommendation step actually catches this is the thing this whole project is trying to prove.
+One of those resources, `pd-payments-dr-volume-01`, is the trap this whole project exists to catch. A naive detector flags it for deletion because nothing's attached to it. But it's tagged `purpose=disaster-recovery`, and that matches a documented precedent in the policy docs. Whether the recommendation step actually catches this — instead of just restating the detector's mistake with more confidence — is the thing I built this project to prove.
 
-## BigQuery backend (optional)
+```mermaid
+flowchart TD
+    A["detector.py: orphaned_disk finding\npd-payments-dr-volume-01\n(no attached_instance)"] --> B["investigation_agent\nis this evidence actually worth pursuing?"]
+    B --> C["retrieval_agent: semantic search\nfinds policy-fin-07-orphaned-resources.md"]
+    C --> D["get_document_chunks():\npulls the WHOLE doc, not just the\ntop-k matching chunk"]
+    D --> E{"recommendation_agent:\ndoes resource metadata match a\ndocumented exception in the policy text?"}
+    E -->|"purpose=disaster-recovery\nmatches precedent INC-FIN-0033"| F["requires_manual_review = true\nNO deletion proposed"]
+    E -->|"no matching exception"| G["propose deletion"]
+    F --> H["human_approval interrupt()\nflagged for owning team sign-off"]
+    G --> H2["human_approval interrupt()\nawaiting approve / reject"]
 
-Billing, utilization, and metadata can come from BigQuery instead of CSV/JSON. Set `BIGQUERY_DATASET` (`project.dataset`) to switch it on; leave it unset and everything reads from CSV/JSON like normal. To create the dataset and tables once:
+    style E fill:#fff3cd,stroke:#333,color:#111
+    style F fill:#d4edda,stroke:#333,color:#111
+    style G fill:#f8d7da,stroke:#333,color:#111
+```
+
+The `get_document_chunks()` step exists because of a real bug I hit while building this. The first version of `retrieval_agent` only pulled the top-k *chunks* from Chroma, and for this exact case the short "Precedent" section — where `INC-FIN-0033` lives — ranked below the cutoff. The agent never saw it, and confidently proposed deleting a disaster-recovery volume. The fix was two-stage retrieval: semantic search picks the right *document*, then the whole document gets pulled directly by filename, skipping a second similarity search entirely. `test_orchestrator.py` asserts this exact case by name so it can't quietly regress.
+
+## About the billing data
+
+Everything above runs against mock data today — this is a portfolio project, not something plugged into a real GCP bill. But there's also a working BigQuery backend, not because the project needs two data sources, but because if this ever does get pointed at a real cloud bill, I wanted that path already built and tested rather than something to figure out under pressure later. Set `BIGQUERY_DATASET` (`project.dataset`) and `detector.py` reads from three BigQuery tables instead of the local CSV/JSON files; leave it unset and it behaves exactly as before. It's exercised the same way the CSV path is — same detector code, same 7 findings, same DR-volume trap case, just a different source underneath.
+
+To create the dataset and tables once:
 
 ```bash
 bq mk --dataset --location=REGION PROJECT_ID:finops_copilot
@@ -197,20 +185,18 @@ bq mk --table PROJECT_ID:finops_copilot.resource_metadata \
   resource_name:STRING,team:STRING,attached_instance:BOOLEAN,last_accessed_days_ago:INTEGER,extra_attributes:STRING
 ```
 
-`extra_attributes` is a JSON string holding whatever fields don't fit a fixed schema, things like `machine_type`, `disk_type`, `purpose`, since they vary by resource type. The service account needs `roles/bigquery.dataEditor` on the dataset and `roles/bigquery.jobUser` at the project level.
+`extra_attributes` is a JSON string holding whatever fields don't fit a fixed schema — `machine_type`, `disk_type`, `purpose`, since these vary by resource type. The service account needs `roles/bigquery.dataEditor` on the dataset and `roles/bigquery.jobUser` at the project level.
 
-## Design notes
+## A few design decisions
 
-A few decisions worth knowing the reasoning behind, in case they look arbitrary:
+Things that might look arbitrary without the reasoning behind them:
 
 - Chroma runs embedded in-process. No separate vector DB service to stand up.
-- Retrieval is two-stage. `retrieve()` finds the right document, then `get_document_chunks()` grabs the whole thing directly by filename, without running another similarity search. That second step deliberately skips vector matching, because vector matching was the reason a policy's Precedent section could get missed in the first place.
+- Retrieval is two-stage, as above — `retrieve()` finds the right document, `get_document_chunks()` grabs the whole thing by filename without a second similarity search, because vector matching was the reason the Precedent section got missed in the first place.
 - The Kafka trigger is a utilization breach, not a billing event. Billing export is daily-batch and far too slow to react to anything in real time.
-- The checkpointer in `orchestrator.py` is `InMemorySaver` by default, and switches to a Redis-backed `RedisSaver` when `REDIS_URL` is set. That's the whole reason `api.py` can resume a paused run from a completely different request or pod.
-- Metrics use `status ∈ {proposed, approved, rejected}`. There's no separate "manual review" status. A downgrade to manual review still counts as `rejected`, because the pipeline is refusing to let it through on its own either way.
+- The checkpointer in `orchestrator.py` is `InMemorySaver` by default and switches to a Redis-backed `RedisSaver` when `REDIS_URL` is set — that's the whole reason `api.py` can resume a paused run from a completely different request or pod.
+- Metrics use `status ∈ {proposed, approved, rejected}`. There's no separate "manual review" status — a downgrade to manual review still counts as `rejected`, because the pipeline is refusing to let it through on its own either way.
 
-## Status
+## Where it stands
 
-Everything above is verified live on a real GKE cluster: Redis, the API, BigQuery (through Workload Identity), and Kafka, including `consumer_orchestrator.py` actually invoking the real orchestrator pipeline off a live Kafka event. Each `infra/*/README.md` has the specific bugs that came up getting it there and how they got fixed.
-
-The one thing not yet exercised is the CI/CD workflows against a real GitHub Actions run. Deploys so far have all been manual, run locally component by component, on purpose, while I'm still iterating on everything else.
+Everything described above is built and has been run for real against a live GKE cluster — not just locally, not just claimed. Redis, the API, BigQuery (through Workload Identity), Kafka (including a real event actually triggering the real orchestrator pipeline), the MCP server, monitoring, and CI/CD have all been exercised end to end, with the real bugs that came up along the way and how they got fixed written up in each `infra/*/README.md`.

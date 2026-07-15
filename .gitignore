@@ -35,6 +35,9 @@ agent_code/evals/results/*.json
 # --- Claude Code local settings (per-developer, not shared config) ---
 .claude/settings.local.json
 
+# --- MCP client config: hardcoded to this machine's Python path, not portable ---
+.mcp.json
+
 # --- OS / editor ---
 .DS_Store
 Thumbs.db
@@ -49,6 +52,7 @@ INTERVIEW_PREP.md
 
 # --- Local-only deploy script, kept out of the public repo on purpose ---
 deploy.sh
+interactive_mcp_demo.sh
 
 # --- Personal GitHub setup reference scripts, not project documentation ---
 github-repo-setup.sh
