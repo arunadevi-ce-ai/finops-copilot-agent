@@ -1,5 +1,11 @@
 # FinOps Copilot
 
+![Build and push](https://github.com/arunadevi-ce-ai/finops-copilot-agent/actions/workflows/build-and-push.yml/badge.svg)
+![PR validation](https://github.com/arunadevi-ce-ai/finops-copilot-agent/actions/workflows/pr-validation.yml/badge.svg?event=pull_request)
+![Sync manifest](https://github.com/arunadevi-ce-ai/finops-copilot-agent/actions/workflows/sync-manifest-to-cluster.yml/badge.svg)
+
+**TL;DR:** Rules find cloud waste. LangGraph agents check each finding against real policy documents and have to cite the exact section they rely on. A human approves before anything changes. It catches the disaster-recovery disk that a naive detector would happily delete.
+
 An agent that catches wasted cloud spend, checks it against real company policy before suggesting anything, and never touches a resource without a human saying yes first.
 
 ## Why I built this
@@ -20,6 +26,12 @@ Every finding and every recommendation also emits a Prometheus metric, which is 
 
 ## Architecture
 
+At a glance:
+
+![FinOps Copilot architecture overview](Assets/finops_architecture_overview.png)
+
+The detailed view:
+
 ![FinOps Copilot system flow](Assets/finops_system_flowchart.svg)
 
 `detector.py` feeds `orchestrator.py`. Two things can call into that pipeline from the outside — `api.py` (REST) and `mcp_server.py` (MCP over stdio) — and a third path comes in sideways through `events/`, where a Kafka consumer reconstructs a finding from an event and runs the same pipeline. `metrics.py` is wired into all of it and feeds Grafana. Everything under `infra/` is what actually runs this on Kubernetes: Kafka, Redis, monitoring, and the API service.
@@ -33,7 +45,7 @@ Python, LangGraph for the agent graph, OpenAI for the LLM (swappable — see `or
 ## Project layout
 
 ```
-finops-copilot/
+finops-copilot-agent/
 ├── agent_code/                  # Docker build context
 │   ├── generate_mock_data.py    # Generates data/billing/*
 │   ├── detector.py              # Rule-based anomaly detector
@@ -117,7 +129,7 @@ It talks over stdio, so it needs to be launched by an MCP client, not run standa
     "finops-copilot": {
       "command": "python",
       "args": ["mcp_server.py"],
-      "cwd": "/path/to/finops-copilot/agent_code",
+      "cwd": "/path/to/finops-copilot-agent/agent_code",
       "env": { "OPENAI_API_KEY": "sk-..." }
     }
   }
@@ -141,6 +153,29 @@ python -m pytest -q -s test_orchestrator.py     # see the actual LLM output
 ```
 
 `test_orchestrator.py`, `test_metrics.py`, and `test_mcp_server.py` make real OpenAI calls on purpose — mocking the LLM would just be testing that a mock returns what you told it to return. `test_events.py`, `test_watcher.py`, and `test_consumers.py` mock the `confluent_kafka` client instead, since there's no live broker in CI.
+
+## Evaluation
+
+Unit tests check that each piece works. The eval harness in `agent_code/evals/` checks something different: whether the whole pipeline still makes the *right decision* on a fixed set of 9 golden scenarios. The ground truth isn't hand-copied — `scenarios.py` imports it straight from `test_detector.py`, so the two can't drift apart.
+
+- **7 detector-only scenarios** — 5 resources that must be flagged with the right category, and 2 clean resources that must never be flagged.
+- **2 LLM-backed scenarios** that run the full orchestrator:
+  - `dr_volume_trap` — `pd-payments-dr-volume-01` must be downgraded to manual review, must not propose deletion, and must cite the Precedent section of `policy-fin-07-orphaned-resources.md`.
+  - `idle_gpu_cost_spike` — only the structural checks are hard here. Which policy gets cited legitimately varies run to run (`policy-fin-04` and `policy-fin-11` are both defensible), so the citation is tracked, not pinned.
+
+Checks come in two kinds. **Hard** checks fail the run: the detector category, the graph actually pausing at `interrupt()`, a recommendation being present, and — for the trap — the manual-review decision, no deletion, and the policy citation. **Soft** checks are tracked but never fail anything, because some run-to-run variance is expected from an LLM: whether the GPU citation lands in the acceptable set, and whether the right policy doc ranks top-1 / top-3 in `rag.retrieve()` for the query the investigation agent wrote (full run only).
+
+```bash
+python -m evals.run --fast                    # detector stage only, zero API calls
+python -m evals.run                           # full run, real LLM calls for the 2 orchestrator scenarios
+python -m evals.run --scenario dr_volume_trap # one scenario
+python -m evals.run --repeat 10               # reliability audit: pass rate over repeated LLM runs
+python -m evals.run --no-write                # skip writing result files
+```
+
+`--fast` is the deterministic part, and `pr-validation.yml` is configured to run it on every PR to `main`, alongside the zero-API-cost pytest suite — any hard-check failure fails the job. The full run is the one that makes real OpenAI calls, so it's run by hand rather than in CI.
+
+Each local run writes a full JSON snapshot to `evals/results/` and appends one row to `evals/results/history.csv` (timestamp, git SHA, hard pass/fail counts, soft-metric rates), so pass rates can be tracked as a trend over time instead of a one-off result. A CI run's row is written inside the throwaway runner and isn't committed back.
 
 ## The DR-volume trap
 
