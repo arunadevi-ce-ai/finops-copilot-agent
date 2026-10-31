@@ -38,6 +38,77 @@ The detailed view:
 
 Every piece above has been run for real against a live GKE cluster, not just locally — including CI/CD itself (a real code change triggered `build-and-push.yml`, which opened a PR, and merging it triggered `sync-manifest-to-cluster.yml`, which deployed the new image).
 
+### Request flow
+
+The REST API path, as deployed on GKE. The CLI, MCP server and Kafka consumer call the same `orchestrator.run_for_finding()`; only the entry point differs.
+
+**`POST /propose`**: the pipeline runs up to `interrupt()`, the paused state is checkpointed to Redis, and a one-time approval token is returned.
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant API as FastAPI /propose
+    participant DET as detector.py
+    participant BQ as BigQuery
+    participant G as LangGraph orchestrator
+    participant LLM as OpenAI LLM
+    participant CH as Chroma (in-process)
+    participant R as Redis
+
+    U->>API: POST /propose {"resource_name": "pd-payments-dr-volume-01"}
+    API->>DET: run_detector()
+    DET->>BQ: query billing, utilization, metadata
+    BQ-->>DET: rows
+    DET-->>API: 7 findings
+    alt name not in findings
+        API-->>U: 404 + list of valid names (no AI call)
+    end
+    API->>G: run_for_finding(finding, thread_id)
+    Note over G: build_initial_state(): finding + cost facts + tags
+    G->>LLM: investigation_agent: finding + facts
+    LLM-->>G: InvestigationResult {worth_pursuing, policy_search_query}
+    G->>CH: retrieve(query, top_k=1)
+    CH-->>G: best match → source_file (policy-fin-07)
+    G->>CH: get_document_chunks(source_file)
+    CH-->>G: all 4 sections, incl. Precedent
+    G->>LLM: recommendation_agent: finding + facts + full policy
+    LLM-->>G: Recommendation {action, $, requires_manual_review, citation}
+    Note over G: human_approval: interrupt() pauses the run
+    G->>R: save checkpoint under thread_id
+    G-->>API: state so far (recommendation)
+    API->>R: SETEX finops:token:{token} 1800s {thread_id, ...}
+    API-->>U: 200 {recommendation, approval_token}
+```
+
+**`POST /confirm`**: the token is consumed with `GETDEL` (a used, unknown or expired token returns 410), and the paused run is resumed from its Redis checkpoint, on any pod.
+
+```mermaid
+sequenceDiagram
+    participant U as User / Approver
+    participant API as FastAPI /confirm
+    participant R as Redis
+    participant G as LangGraph orchestrator
+
+    U->>API: POST /confirm {token, approved, approver}
+    API->>R: GETDEL finops:token:{token}
+    alt token missing, used or expired
+        R-->>API: nil
+        API-->>U: 410 Gone
+    else token valid (deleted in the same atomic step)
+        R-->>API: {thread_id, resource_name}
+        API->>G: resume_decision(thread_id, decision)
+        Note over G: build_graph(): fresh graph, any pod
+        G->>R: load checkpoint by thread_id
+        R-->>G: paused state
+        Note over G: Command(resume=decision) → human_approval records it
+        G->>R: save final checkpoint
+        G-->>API: final state
+        API-->>U: 200 {human_decision, recommendation, "status": "resumed"}
+    end
+```
+
+The diagrams show one checkpoint write for readability; LangGraph checkpoints state after every node. Chroma runs inside the API process, so policy retrieval makes no network call; the pipeline's external calls are the two OpenAI requests and the Redis checkpoint writes.
+
 ## Stack
 
 Python, LangGraph for the agent graph, OpenAI for the LLM (swappable — see `orchestrator.py`'s `_make_llm()`), Chroma for retrieval (embedded in-process, no separate service to run), Kafka for events (Bitnami's Helm chart, KRaft mode), Redis for state and approval tokens (`redis-stack-server`, needed for RediSearch), Prometheus + Grafana for metrics, MCP's low-level `Server` API for tool access, pytest for testing, Helm charts and raw manifests for infra.
